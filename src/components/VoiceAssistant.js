@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 const VoiceAssistant = () => {
   const [status, setStatus] = useState('inactive'); // inactive, listening, processing, speaking, error
@@ -8,149 +8,42 @@ const VoiceAssistant = () => {
   // Comandos especiales y sus acciones
   const COMMANDS = {
     'abrir chatgpt': {
-      action: () => window.open('https://chat.openai.com', '_blank'),
-      response: "Abriendo ChatGPT en una nueva pestaña"
+      action: () => {
+        const url = 'https://chat.openai.com';
+        console.log(`[COMMANDS] Ejecutando acción: Abrir URL ${url}`);
+        window.open(url, '_blank');
+      },
+      response: "Abriendo ChatGPT en una nueva pestaña",
+      aliases: ['abrir chat gt', 'abre chat gpt', 'abre chatgt', 'abrir gpt', 'abrir chat g p t'] // Añade más alias si encuentras otras transcripciones
     },
     'buscar en google': {
-      action: (query) => window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank'),
-      response: (query) => `Buscando "${query}" en Google`
+      action: (query) => {
+        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        console.log(`[COMMANDS] Ejecutando acción: Buscar en Google para "${query}", URL: ${url}`);
+        window.open(url, '_blank');
+      },
+      response: (query) => `Buscando "${query}" en Google`,
+      aliases: ['busca en google', 'búscame en google', 'buscar en googel']
     },
     'reproducir en youtube': {
-      // Corregida la URL para una búsqueda real en YouTube
-      action: (query) => window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, '_blank'),
-      response: (query) => `Reproduciendo "${query}" en YouTube`
-    }
-  };
-
-  // Inicializar reconocimiento de voz
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setStatus('error');
-      setConversation([{ speaker: 'assistant', text: 'Tu navegador no soporta reconocimiento de voz' }]);
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = 'es-ES'; // Asegura que el idioma sea español
-
-    recognition.onstart = () => {
-      setStatus('listening');
-    };
-
-    recognition.onerror = (event) => {
-      console.error('Error de reconocimiento:', event.error);
-      setStatus('error');
-      let errorMessage = 'Error desconocido en el reconocimiento de voz.';
-      if (event.error === 'not-allowed') {
-        errorMessage = 'Acceso al micrófono denegado. Por favor, permite el uso del micrófono en la configuración de tu navegador.';
-      } else if (event.error === 'no-speech') {
-          errorMessage = 'No se detectó voz. Por favor, intenta hablar más claro o revisa tu micrófono.';
-      }
-      setConversation(prev => [...prev, {
-        speaker: 'assistant',
-        text: `Error de reconocimiento: ${errorMessage}`
-      }]);
-    };
-
-    recognition.onend = () => {
-      // Solo si el estado no es un error, vuelve a inactivo.
-      // Si fue un error, el estado ya está en 'error'.
-      if (status !== 'error') setStatus('inactive');
-    };
-
-    recognition.onresult = async (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript;
-      await processVoiceCommand(transcript);
-    };
-
-    recognitionRef.current = recognition;
-
-    // Cleanup: detiene el reconocimiento cuando el componente se desmonta
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [status]); // Añadir 'status' al array de dependencias para que `onend` use el estado actual
-
-  // Procesar comandos de voz
-  const processVoiceCommand = async (command) => {
-    if (!command.trim()) return;
-
-    try {
-      setStatus('processing');
-      setConversation(prev => [...prev, { speaker: 'user', text: command }]);
-
-      // Verificar si es un comando especial
-      for (const [cmd, {action, response}] of Object.entries(COMMANDS)) {
-        if (command.toLowerCase().includes(cmd)) {
-          // Extraer la parte de la consulta si existe después del comando
-          const query = command.toLowerCase().replace(cmd, '').trim();
-
-          if (typeof action === 'function') { // Asegurarse de que 'action' es una función
-            if (query) {
-              action(query);
-              const responseText = typeof response === 'function' ? response(query) : response;
-              setConversation(prev => [...prev, { speaker: 'assistant', text: responseText }]);
-              await speak(responseText);
-              return;
-            } else {
-              action(); // Ejecutar acción sin query si no hay
-              const responseText = typeof response === 'function' ? response('') : response; // Pasa un string vacío o usa el string directo
-              setConversation(prev => [...prev, { speaker: 'assistant', text: responseText }]);
-              await speak(responseText);
-              return;
-            }
-          }
-        }
-      }
-
-      // Si no es comando especial, consultar a la API de OpenAI
-      const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}` // Asegúrate de tener tu clave API aquí
-        },
-        body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [{
-            role: "user",
-            content: command
-          }],
-          temperature: 0.7,
-          max_tokens: 200
-        })
-      });
-
-      const data = await apiResponse.json();
-      const assistantText = data.choices[0]?.message?.content || "No pude generar una respuesta. Por favor, intenta de nuevo.";
-
-      setConversation(prev => [...prev, { speaker: 'assistant', text: assistantText }]);
-      await speak(assistantText);
-    } catch (error) {
-      console.error('Error al procesar comando o consultar OpenAI:', error);
-      setStatus('error');
-      setConversation(prev => [...prev, {
-        speaker: 'assistant',
-        text: `Lo siento, ocurrió un error: ${error.message}. Asegúrate de que tu clave de API de OpenAI sea correcta y tengas conexión a internet.`
-      }]);
-    } finally {
-      setStatus('inactive');
+      action: (query) => {
+        // Asegúrate de que la URL de búsqueda de YouTube es correcta
+        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+        console.log(`[COMMANDS] Ejecutando acción: Reproducir en YouTube para "${query}", URL: ${url}`);
+        window.open(url, '_blank');
+      },
+      response: (query) => `Reproduciendo "${query}" en YouTube`,
+      aliases: ['pon en youtube', 'reproduce en youtube', 'youtube']
     }
   };
 
   // Sintetizar voz
-  const speak = (text) => {
+  const speak = useCallback((text) => {
     return new Promise((resolve, reject) => {
       if (!('speechSynthesis' in window)) {
-        console.warn('SpeechSynthesis no está disponible en este navegador.');
-        setStatus('inactive'); // Asegura que el estado vuelva a inactivo incluso si no puede hablar
-        resolve(); // Resuelve la promesa para no bloquear la ejecución
+        console.warn('[Speak] SpeechSynthesis no está disponible en este navegador.');
+        setStatus('inactive');
+        resolve();
         return;
       }
 
@@ -165,33 +58,227 @@ const VoiceAssistant = () => {
         resolve();
       };
       utterance.onerror = (event) => {
-        console.error('Error en la síntesis de voz:', event.error);
-        setStatus('error'); // Podrías cambiar a 'inactive' si prefieres no mostrar error persistente
-        reject(`Error de voz: ${event.error}`); // Rechaza para que el catch lo maneje si es necesario
+        console.error('[Speak Error] Error en la síntesis de voz:', event.error);
+        setStatus('error');
+        reject(`Error de voz: ${event.error}`);
       };
       window.speechSynthesis.speak(utterance);
     });
-  };
+  }, [setStatus]);
+
+  // Procesar comandos de voz
+  const processVoiceCommand = useCallback(async (command) => {
+    if (!command.trim()) {
+      console.log('[ProcessCommand] Comando de voz vacío o solo espacios.');
+      return;
+    }
+
+    const cleanedCommand = command.toLowerCase().trim();
+    console.log('[ProcessCommand] Comando de voz reconocido (original):', `"${command}"`);
+    console.log('[ProcessCommand] Comando de voz limpio (minúsculas y trim):', `"${cleanedCommand}"`);
+    setConversation(prev => [...prev, { speaker: 'user', text: command }]);
+
+    try {
+      setStatus('processing');
+
+      let commandHandled = false; // Flag para saber si un comando especial fue manejado
+
+      // Verificar si es un comando especial o uno de sus alias
+      for (const [cmdKey, { action, response, aliases }] of Object.entries(COMMANDS)) {
+        const potentialTriggers = [cmdKey, ...(aliases || [])]; // Incluye el cmdKey y todos sus aliases
+
+        for (const trigger of potentialTriggers) {
+          console.log(`[ProcessCommand] Intentando coincidir: "${cleanedCommand}" con potencial disparador: "${trigger}"`);
+          if (cleanedCommand.includes(trigger)) {
+            console.log(`[ProcessCommand] ¡Coincidencia encontrada! Comando especial "${cmdKey}" (activado por "${trigger}") detectado.`);
+            commandHandled = true;
+
+            // Extrae la parte de la consulta DESPUÉS del disparador que coincidió
+            const query = cleanedCommand.replace(trigger, '').trim();
+
+            // Lógica específica para "abrir chatgpt" para asegurar que no tenga texto extra
+            if (cmdKey === 'abrir chatgpt') {
+                if (query) {
+                    const responseText = `Para abrir ChatGPT, por favor di solo "Abrir ChatGPT" o una frase similar sin añadir más texto. Dijiste: "${command}"`;
+                    setConversation(prev => [...prev, { speaker: 'assistant', text: responseText }]);
+                    await speak(responseText);
+                    return; // Sale para no ir a OpenAI
+                } else {
+                    action(); // Ejecuta la acción directa de abrir ChatGPT
+                    const responseText = typeof response === 'function' ? response('') : response;
+                    setConversation(prev => [...prev, { speaker: 'assistant', text: responseText }]);
+                    await speak(responseText);
+                    return; // Sale de la función
+                }
+            }
+            // Para otros comandos como buscar/reproducir, la 'query' es esperada
+            else {
+                action(query);
+                const responseText = typeof response === 'function' ? response(query) : response;
+                setConversation(prev => [...prev, { speaker: 'assistant', text: responseText }]);
+                await speak(responseText);
+                return; // Sale de la función
+            }
+          }
+        }
+      }
+
+      // Si ningún comando especial fue manejado, consulta a la API de OpenAI
+      if (!commandHandled) {
+        console.log('[ProcessCommand] No se detectó un comando especial. Consultando a OpenAI...');
+
+        const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "gpt-3.5-turbo",
+            messages: [{
+              role: "user",
+              content: command
+            }],
+            temperature: 0.7,
+            max_tokens: 200
+          })
+        });
+
+        if (!apiResponse.ok) {
+            const errorData = await apiResponse.json();
+            console.error('[OpenAI API Error] HTTP Status:', apiResponse.status, 'Error Data:', errorData);
+            let apiErrorMessage = `Error de la API de OpenAI: ${apiResponse.status}`;
+            if (errorData.error && errorData.error.message) {
+                apiErrorMessage += ` - ${errorData.error.message}`;
+            }
+            throw new Error(apiErrorMessage); // Lanza un error para ser capturado por el catch
+        }
+
+        const data = await apiResponse.json();
+        const assistantText = data?.choices?.[0]?.message?.content || "No pude generar una respuesta de la IA. Por favor, intenta de nuevo.";
+
+        setConversation(prev => [...prev, { speaker: 'assistant', text: assistantText }]);
+        await speak(assistantText);
+      }
+
+    } catch (error) {
+      console.error('[General Error] Error al procesar comando o consultar OpenAI:', error);
+      setStatus('error');
+      let userErrorMessage = 'Lo siento, ocurrió un error inesperado.';
+      if (error.message.includes('Failed to fetch')) {
+        userErrorMessage = 'Error de conexión a internet o la API de OpenAI no está accesible.';
+      } else if (error.message.includes('401 Unauthorized')) {
+        userErrorMessage = 'Error de autenticación: Tu clave de API de OpenAI podría ser incorrecta o no válida. Por favor, revísala en el archivo .env y reinicia el servidor.';
+      } else if (error.message.includes('429 Too Many Requests')) {
+        userErrorMessage = 'Has excedido tu cuota de uso de la API de OpenAI. Intenta más tarde o verifica tu plan de facturación en la plataforma de OpenAI.';
+      } else {
+        userErrorMessage = `Lo siento, ocurrió un error: ${error.message}`;
+      }
+
+      setConversation(prev => [...prev, {
+        speaker: 'assistant',
+        text: userErrorMessage
+      }]);
+    } finally {
+      if (status !== 'error') {
+        setStatus('inactive');
+      }
+    }
+  }, [setConversation, setStatus, speak, COMMANDS, status]);
+
+  // Inicializar reconocimiento de voz
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setStatus('error');
+      setConversation([{ speaker: 'assistant', text: 'Tu navegador no soporta reconocimiento de voz' }]);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'es-ES';
+
+    recognition.onstart = () => {
+      setStatus('listening');
+      console.log('[Recognition] Reconocimiento de voz iniciado.');
+    };
+
+    recognition.onerror = (event) => {
+      console.error('[Recognition Error] Error de reconocimiento:', event.error);
+      let errorMessage = 'Error desconocido en el reconocimiento de voz.';
+      if (event.error === 'not-allowed') {
+        errorMessage = 'Acceso al micrófono denegado. Por favor, permite el uso del micrófono en la configuración de tu navegador.';
+        setStatus('error');
+      } else if (event.error === 'no-speech') {
+          errorMessage = 'No se detectó voz. Por favor, intenta hablar más claro o revisa tu micrófono.';
+          setStatus('inactive');
+          console.log('[Recognition] Reconocimiento de voz detenido por no-speech.');
+      } else if (event.error === 'audio-capture') {
+          errorMessage = 'No se pudo capturar audio del micrófono.';
+          setStatus('error');
+      } else if (event.error === 'network') {
+          errorMessage = 'Error de red en el servicio de reconocimiento de voz.';
+          setStatus('error');
+      } else {
+          setStatus('error');
+      }
+
+      if (event.error !== 'no-speech') {
+        setConversation(prev => [...prev, {
+          speaker: 'assistant',
+          text: `Error de reconocimiento: ${errorMessage}`
+        }]);
+      }
+    };
+
+    recognition.onend = () => {
+      if (status !== 'error') {
+          setStatus('inactive');
+          console.log('[Recognition] Reconocimiento de voz finalizado.');
+      } else {
+          console.log('[Recognition] Reconocimiento de voz finalizado, pero el estado permanece en error.');
+      }
+    };
+
+    recognition.onresult = async (event) => {
+      const transcript = event.results[event.results.length - 1][0].transcript;
+      console.log('[Recognition] Transcripción obtenida:', `"${transcript}"`);
+      await processVoiceCommand(transcript);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        console.log('[Recognition] Reconocimiento de voz detenido por limpieza del componente.');
+      }
+    };
+  }, [status, processVoiceCommand, setConversation]);
 
   // Controlar el reconocimiento de voz
   const toggleListening = () => {
-    if (recognitionRef.current) { // Asegura que recognitionRef.current no es null
+    if (recognitionRef.current) {
         if (status === 'listening') {
             recognitionRef.current.stop();
             setStatus('inactive');
+            console.log('[Toggle] Deteniendo reconocimiento por botón.');
         } else {
-            // Detener cualquier síntesis de voz en curso antes de empezar a escuchar
-            window.speechSynthesis.cancel(); 
+            window.speechSynthesis.cancel();
             recognitionRef.current.start();
+            console.log('[Toggle] Iniciando reconocimiento por botón.');
         }
     } else {
-        console.error("El reconocimiento de voz no está inicializado.");
+        console.error("[Toggle] El reconocimiento de voz no está inicializado.");
         setConversation(prev => [...prev, { speaker: 'assistant', text: 'El reconocimiento de voz no pudo iniciarse. Intenta recargar la página.' }]);
         setStatus('error');
     }
   };
 
-  // Estilos en el componente (sin cambios, están bien)
+  // Estilos en el componente (sin cambios)
   const styles = {
     container: {
       maxWidth: '800px',
@@ -255,8 +342,8 @@ const VoiceAssistant = () => {
       borderRadius: '8px',
       padding: '20px',
       boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-      overflowY: 'auto', // Permite scroll si hay muchos mensajes
-      maxHeight: '400px' // Altura máxima para el scroll
+      overflowY: 'auto',
+      maxHeight: '400px'
     },
     message: {
       marginBottom: '15px',
@@ -308,7 +395,7 @@ const VoiceAssistant = () => {
 
   return (
     <div style={styles.container}>
-      <style>{spinKeyframes}</style> {/* Incluye los keyframes */}
+      <style>{spinKeyframes}</style>
 
       <h1 style={styles.title}>Asistente de Voz ChatGPT</h1>
 
@@ -334,7 +421,7 @@ const VoiceAssistant = () => {
           ...styles.button,
           ...(status === 'listening' && styles.buttonActive)
         }}
-        disabled={status === 'processing' || status === 'speaking'} // Deshabilita el botón mientras procesa o habla
+        disabled={status === 'processing' || status === 'speaking'}
       >
         {status === 'listening' ? '🛑 Detener' : '🎤 Hablar'}
       </button>
