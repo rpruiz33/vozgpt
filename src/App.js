@@ -34,16 +34,26 @@ const App = () => {
   };
 
   useEffect(() => {
-    // Simular inicio de la aplicación
-    setTimeout(() => {
-      setStatus('LISTO');
-      setMessage('Aplicación cargada correctamente');
-      
-      // Iniciar reconocimiento de voz después de 2 segundos
-      setTimeout(simulateVoiceRecognition, 2000);
-    }, 1500);
-  }, []);
+  // Definir la función dentro del useEffect
+  const simulateVoiceRecognition = () => {
+    setStatus('ESCUCHANDO');
+    setMessage('Habla ahora...');
 
+    setTimeout(() => {
+      const fakeCommand = "Abrir ChatGPT";
+      setTranscript(fakeCommand);
+      processVoiceCommand(fakeCommand);
+    }, 3000);
+  };
+
+  // Simular inicio de la aplicación
+  setTimeout(() => {
+    setStatus('LISTO');
+    setMessage('Aplicación cargada correctamente');
+    
+    setTimeout(simulateVoiceRecognition, 2000);
+  }, 1500);
+}, []); // Ahora el array de dependencias está vacío correctamente
   return (
     <div className="app-container">
       <h1 className="app-title">ChatGPT por Voz</h1>
